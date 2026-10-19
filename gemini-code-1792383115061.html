@@ -1,0 +1,2201 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>自動化記事 App — 雲端多空間正式版</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 引入 Supabase 官方 JS SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Inter', 'Noto Sans TC', sans-serif; background-color: #0b1120; color: #f8fafc; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
+    .custom-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+    .custom-scroll::-webkit-scrollbar-track { background: #0f172a; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    @keyframes pulse-border {
+      0%, 100% { border-color: rgba(245, 158, 11, 0.95); box-shadow: 0 0 12px rgba(245, 158, 11, 0.25); }
+      50% { border-color: rgba(245, 158, 11, 0.35); box-shadow: none; }
+    }
+    .near-due-alert { animation: pulse-border 2s infinite; }
+
+    .phone-frame-wrapper {
+      max-width: 396px !important;
+      width: 396px !important;
+      margin: 12px auto !important;
+      border: 10px solid #1e293b;
+      border-radius: 36px;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85);
+      min-height: 820px;
+      max-height: 90vh;
+      overflow-y: auto;
+      overflow-x: hidden !important;
+      position: relative;
+      background-color: #0f172a;
+    }
+
+    .is-mobile-sim .responsive-confirm-grid { grid-template-columns: 1fr !important; }
+    .is-mobile-sim .responsive-two-col { grid-template-columns: 1fr !important; }
+    .is-mobile-sim .responsive-board-grid { grid-template-columns: 1fr !important; }
+    .is-mobile-sim .hide-on-mobile-sim { display: none !important; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- 頂部控制與個人空間狀態列 -->
+  <div class="bg-slate-950 border-b border-slate-800/80 px-3 py-2 text-xs">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+      <div class="flex flex-wrap items-center gap-1.5">
+        <button onclick="setViewportMode('desktop')" id="vp-desktop" class="px-2.5 py-1 rounded-md bg-indigo-600 text-white font-medium transition">
+          💻 電腦版
+        </button>
+        <button onclick="setViewportMode('mobile')" id="vp-mobile" class="px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition">
+          📱 手機預覽
+        </button>
+        <!-- 雲端同步狀態指示燈 -->
+        <button onclick="openCloudSettingsModal()" id="cloud-status-btn"
+          class="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 flex items-center gap-1.5 transition">
+          <span id="cloud-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+          <span id="cloud-status-text">連線中...</span>
+        </button>
+        <!-- 個人專屬空間切換鈕 -->
+        <button onclick="openWorkspaceModal()" id="workspace-btn"
+          class="px-2.5 py-1 rounded-md bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 flex items-center gap-1 font-medium transition">
+          🔑 空間：<span id="current-ws-label" class="font-bold text-white">未設定</span>
+        </button>
+      </div>
+      <div class="flex flex-wrap items-center gap-1.5">
+        <button onclick="syncFromSupabase(true)" id="btn-manual-sync" class="px-2.5 py-1 rounded-md bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 transition">
+          🔄 立即同步
+        </button>
+        <button onclick="openOnboardingModal()" class="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 transition">
+          🎯 初始問卷
+        </button>
+        <button onclick="openCloudSettingsModal()" class="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+          ⚙️ AI 設定
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主應用程式容器 -->
+  <div id="app-shell" class="flex-1 flex flex-col w-full max-w-7xl mx-auto transition-all duration-200 pb-20 md:pb-8 overflow-x-hidden">
+
+    <!-- App Header -->
+    <header class="bg-slate-900/95 backdrop-blur border-b border-slate-800 sticky top-0 z-30 px-3 sm:px-5 py-2.5">
+      <div class="flex items-center justify-between gap-2 w-full">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-sm shadow-lg shadow-indigo-600/30 shrink-0">AI</div>
+          <div class="min-w-0">
+            <h1 class="font-bold text-sm sm:text-base truncate flex items-center gap-1.5">
+              <span class="truncate">自動化記事 App</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">雲端同步版</span>
+            </h1>
+            <p class="text-[11px] text-slate-400 truncate">獨立私人空間隔離 ‧ 接續事件樹 ‧ 兩階分類篩選</p>
+          </div>
+        </div>
+
+        <!-- 電腦版導覽列 -->
+        <nav id="desktop-nav" class="hidden md:flex items-center gap-1.5 shrink-0">
+          <button onclick="switchMainView('board')" id="d-nav-board" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white transition">
+            📋 看板視圖
+          </button>
+          <button onclick="switchMainView('evolve')" id="d-nav-evolve" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 transition flex items-center gap-1">
+            ✨ 標籤演化 <span id="d-evolve-badge" class="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded-full text-[11px]">建議</span>
+          </button>
+          <button onclick="switchMainView('archive')" id="d-nav-archive" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 transition flex items-center gap-1">
+            🗄️ 歸檔 <span id="d-archive-badge" class="px-1.5 py-0.2 bg-slate-700 rounded-full text-[11px]">0</span>
+          </button>
+          <button onclick="switchMainView('corrections')" id="d-nav-corrections" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 transition flex items-center gap-1">
+            🧠 修正紀錄 <span id="d-corr-badge" class="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 rounded-full text-[11px]">0</span>
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <!-- 主內容區 -->
+    <main class="flex-1 p-2.5 sm:p-4 flex flex-col gap-3.5 w-full max-w-full overflow-x-hidden">
+
+      <!-- 區塊 1：自由輸入區 -->
+      <section id="input-section-card" class="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-3 sm:p-4 shadow-xl w-full max-w-full">
+        <div class="flex flex-wrap items-center justify-between gap-1.5 mb-2">
+          <label for="user-note-input" class="text-xs sm:text-sm font-semibold text-slate-100">
+            ✍️ 新增記事
+          </label>
+          <button onclick="insertQuickSample()" class="text-[11px] px-2 py-1 rounded-md bg-slate-700 hover:bg-slate-600 text-indigo-300 transition shrink-0">
+            💡 隨機帶入測試句
+          </button>
+        </div>
+
+        <!-- 輸入前預先指定接續對象 -->
+        <div class="mb-2 flex items-center gap-1.5 bg-slate-900/90 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs w-full">
+          <span class="text-indigo-400 shrink-0 font-medium">🔗 接續設定：</span>
+          <select id="pre-parent-select" onchange="onPreParentChange()" class="flex-1 min-w-0 bg-transparent text-slate-200 focus:outline-none truncate text-xs">
+            <option value="">🤖 讓 AI 自動判斷是否接續既有筆記</option>
+          </select>
+          <button id="clear-pre-parent-btn" onclick="clearPreParentLock()" class="hidden text-[11px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 hover:text-rose-300 shrink-0">
+            解除鎖定
+          </button>
+        </div>
+
+        <textarea id="user-note-input" rows="2"
+          placeholder="自由輸入記事...（若不寫時間，AI 會自動設為「♾️ 無截止日」純備忘；也可寫「下週三」、「5天後」）"
+          class="w-full bg-slate-900/95 border border-slate-700 focus:border-indigo-500 rounded-xl p-2.5 sm:p-3 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none leading-relaxed transition"></textarea>
+
+        <!-- 附件預覽 -->
+        <div id="attachment-box" class="hidden mt-2 p-2.5 bg-slate-900/90 border border-indigo-500/40 rounded-xl space-y-2 w-full">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
+              <img id="att-img-thumb" src="" class="hidden w-10 h-10 object-cover rounded-lg border border-slate-700 shrink-0" alt="預覽">
+              <div class="min-w-0">
+                <div id="att-filename" class="text-xs font-semibold text-indigo-300 truncate">檔案名稱</div>
+                <div class="text-[11px] text-slate-400 truncate">AI 自動擷取圖片文字納入判斷</div>
+              </div>
+            </div>
+            <button onclick="removeAttachment()" class="text-xs text-slate-400 hover:text-rose-400 px-1.5 py-0.5 shrink-0">✕</button>
+          </div>
+          <input type="text" id="att-ocr-input"
+            class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div class="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5">
+            <input type="file" id="real-photo-input" accept="image/*" class="hidden" onchange="handleFileSelect(event)">
+            <button onclick="document.getElementById('real-photo-input').click()"
+              class="px-2.5 py-2 rounded-xl bg-slate-700/90 hover:bg-slate-600 active:scale-95 text-xs font-medium text-slate-100 flex items-center gap-1 transition">
+              📷 照片
+            </button>
+            <button onclick="startVoiceRecognition()" id="voice-btn"
+              class="px-2.5 py-2 rounded-xl bg-slate-700/90 hover:bg-slate-600 active:scale-95 text-xs font-medium text-slate-100 flex items-center gap-1 transition">
+              🎙️ 語音
+            </button>
+          </div>
+
+          <button onclick="analyzeUserNote()" id="btn-analyze"
+            class="flex-1 sm:flex-none px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs sm:text-sm font-semibold shadow-lg shadow-indigo-600/30 transition flex items-center justify-center gap-1">
+            ✨ 送出並讓 AI 分析
+          </button>
+        </div>
+
+        <!-- 區塊 1.5：AI 建議確認面板 -->
+        <div id="ai-confirm-panel" class="hidden mt-3.5 pt-3.5 border-t border-slate-700 w-full">
+          <div class="bg-indigo-950/40 border border-indigo-500/50 rounded-2xl p-3 sm:p-4 w-full">
+            <div class="flex flex-wrap items-center justify-between gap-1.5 mb-3">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span id="ai-engine-label" class="px-2 py-0.5 text-[11px] font-bold rounded bg-indigo-500 text-white shrink-0">AI 建議</span>
+                <span id="ai-reason-badge" class="text-xs text-indigo-200 font-medium break-words">已分析語意</span>
+              </div>
+            </div>
+
+            <div class="responsive-confirm-grid grid grid-cols-1 lg:grid-cols-12 gap-3 text-xs w-full">
+
+              <!-- 左側：月曆選擇器 + 無截止日選項 -->
+              <div class="lg:col-span-5 bg-slate-900/95 p-3 rounded-xl border border-slate-700 flex flex-col justify-between min-w-0">
+                <div>
+                  <div class="flex flex-wrap items-center justify-between gap-1 mb-2">
+                    <span class="text-slate-200 font-semibold">📅 1. 建議截止日期</span>
+                    <span id="selected-date-summary" class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-semibold text-[11px]"></span>
+                  </div>
+
+                  <div class="grid grid-cols-3 sm:grid-cols-6 gap-1 mb-2">
+                    <button type="button" onclick="setNoDueDate()" id="btn-no-duedate" class="py-1 px-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 text-[11px] font-medium text-center">♾️無截止</button>
+                    <button type="button" onclick="quickPickOffset(0)" class="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] text-center">今天</button>
+                    <button type="button" onclick="quickPickOffset(1)" class="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] text-center">明天</button>
+                    <button type="button" onclick="quickPickOffset(3)" class="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] text-center">3天後</button>
+                    <button type="button" onclick="quickPickOffset(7)" class="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] text-center">1週後</button>
+                    <button type="button" onclick="quickPickOffset(14)" class="py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] text-center">2週後</button>
+                  </div>
+
+                  <div class="flex items-center justify-between bg-slate-800/90 rounded-lg px-2.5 py-1.5 mb-2">
+                    <button type="button" onclick="changeCalendarMonth(-1)" class="text-slate-300 hover:text-white px-2 py-0.5 font-bold">◀</button>
+                    <span id="cal-month-title" class="font-bold text-slate-100 text-xs">2026 年 10 月</span>
+                    <button type="button" onclick="changeCalendarMonth(1)" class="text-slate-300 hover:text-white px-2 py-0.5 font-bold">▶</button>
+                  </div>
+
+                  <div class="grid grid-cols-7 text-center text-[11px] text-slate-400 font-medium mb-1">
+                    <div class="text-rose-400">日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div class="text-emerald-400">六</div>
+                  </div>
+
+                  <div id="calendar-days-grid" class="grid grid-cols-7 gap-1 text-center"></div>
+                </div>
+
+                <div class="mt-2 pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-400">
+                  <span>🔵 今天 ｜ 🟣 已選截止日</span>
+                  <span id="parsed-date-hint" class="text-emerald-400 font-medium"></span>
+                </div>
+              </div>
+
+              <!-- 右側：緊急度 + 接續對象 + 兩階層標籤系統 -->
+              <div class="lg:col-span-7 flex flex-col gap-2.5 min-w-0">
+                <div class="responsive-two-col grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div class="bg-slate-900/95 p-2.5 rounded-xl border border-slate-700 min-w-0">
+                    <label class="text-slate-200 font-semibold block mb-1">🚦 2. 緊急度分類</label>
+                    <select id="confirm-urgency" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 font-medium">
+                      <option value="urgent">🔥 緊急 (Urgent)</option>
+                      <option value="soon">⏳ 近期 (Soon)</option>
+                      <option value="later">🌱 不急 (Later)</option>
+                    </select>
+                  </div>
+
+                  <div class="bg-slate-900/95 p-2.5 rounded-xl border border-slate-700 min-w-0">
+                    <label class="text-slate-200 font-semibold block mb-1">🌿 3. 接續哪則既有筆記</label>
+                    <select id="confirm-parent" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-100 font-medium truncate">
+                      <option value="">— 獨立新事件（不接續） —</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="bg-slate-900/95 p-3 rounded-xl border border-slate-700 flex-1 flex flex-col justify-between min-w-0">
+                  <div>
+                    <div class="flex flex-wrap items-center justify-between gap-1.5 mb-2">
+                      <label class="text-slate-200 font-semibold">🏷️ 4. 歸屬事件標籤（依大分類分組）</label>
+                      <button type="button" onclick="toggleTagManageMode()" id="btn-tag-manage"
+                        class="px-2 py-0.5 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+                        ⚙️ 管理大分類/標籤
+                      </button>
+                    </div>
+
+                    <div id="tag-manage-hint" class="hidden mb-2 px-2.5 py-1.5 rounded bg-indigo-950/70 border border-indigo-500/40 text-indigo-200 text-[11px] space-y-1.5">
+                      <div>🛠️ <strong>管理模式：</strong>可改名/刪除大分類，或點小標籤右側「✕」移除。</div>
+                      <div class="flex items-center gap-1.5">
+                        <input type="text" id="new-category-input" placeholder="輸入新大分類名稱..."
+                          class="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-100">
+                        <button type="button" onclick="addNewCategoryGroup()" class="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium shrink-0">
+                          ＋新增大分類
+                        </button>
+                      </div>
+                    </div>
+
+                    <div id="grouped-tags-container" class="space-y-2.5 mt-1"></div>
+                  </div>
+
+                  <div class="mt-3 pt-2 border-t border-slate-800 flex flex-wrap items-center gap-1.5">
+                    <select id="new-tag-cat-select" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200 max-w-[140px] truncate"></select>
+                    <input type="text" id="custom-tag-input" placeholder="輸入新小標籤..."
+                      onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomTagToGroup();}"
+                      class="flex-1 min-w-[100px] bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+                    <button type="button" onclick="addCustomTagToGroup()" class="px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-indigo-600 text-slate-200 text-xs font-medium transition shrink-0">
+                      ＋新增標籤
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <div class="mt-3 flex items-center justify-end gap-2">
+              <button onclick="closeConfirmPanel()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium">
+                取消
+              </button>
+              <button onclick="saveConfirmedNote()" id="btn-save-note" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold shadow-lg shadow-emerald-600/30">
+                ✅ 確認儲存筆記
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 視圖 1：看板視圖 -->
+      <section id="main-view-board" class="flex-1 flex flex-col gap-2.5 w-full max-w-full">
+        
+        <!-- 兩階層快速標籤篩選器 -->
+        <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-2 w-full">
+          <div class="flex flex-wrap items-center justify-between gap-1.5">
+            <div class="flex flex-wrap items-center gap-1 text-xs">
+              <span class="text-slate-400 font-medium mr-1">🔍 標籤篩選：</span>
+              <button onclick="selectFilterCategory('ALL')" id="fcat-ALL" class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-medium text-[11px] transition">
+                全部顯示
+              </button>
+              <div id="filter-category-buttons" class="flex flex-wrap items-center gap-1"></div>
+            </div>
+            <span id="active-filter-indicator" class="hidden text-[11px] text-amber-300 font-medium"></span>
+          </div>
+          <div id="filter-subtags-row" class="hidden pt-1.5 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5"></div>
+        </div>
+
+        <!-- 手機四等分並排分類列 -->
+        <div class="w-full">
+          <div class="grid grid-cols-4 md:flex md:items-center gap-1.5 w-full">
+            <button onclick="selectColTab('all')" id="coltab-all" class="hide-on-mobile-sim hidden md:inline-flex px-3 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white transition shrink-0">
+              📋 四欄並排總覽
+            </button>
+            <button onclick="selectColTab('urgent')" id="coltab-urgent" class="w-full md:w-auto py-2 px-1 sm:px-3 rounded-xl text-[11px] sm:text-xs font-semibold bg-slate-800 text-slate-300 transition flex items-center justify-center gap-1">
+              <span>🔥緊急</span>
+              <span id="badge-urgent" class="px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 text-[10px]">0</span>
+            </button>
+            <button onclick="selectColTab('soon')" id="coltab-soon" class="w-full md:w-auto py-2 px-1 sm:px-3 rounded-xl text-[11px] sm:text-xs font-semibold bg-slate-800 text-slate-300 transition flex items-center justify-center gap-1">
+              <span>⏳近期</span>
+              <span id="badge-soon" class="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 text-[10px]">0</span>
+            </button>
+            <button onclick="selectColTab('later')" id="coltab-later" class="w-full md:w-auto py-2 px-1 sm:px-3 rounded-xl text-[11px] sm:text-xs font-semibold bg-slate-800 text-slate-300 transition flex items-center justify-center gap-1">
+              <span>🌱不急</span>
+              <span id="badge-later" class="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px]">0</span>
+            </button>
+            <button onclick="selectColTab('overdue')" id="coltab-overdue" class="w-full md:w-auto py-2 px-1 sm:px-3 rounded-xl text-[11px] sm:text-xs font-semibold bg-slate-800 text-slate-300 transition flex items-center justify-center gap-1">
+              <span>⚠️逾期</span>
+              <span id="badge-overdue" class="px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 text-[10px]">0</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="board-columns-container" class="responsive-board-grid grid grid-cols-1 lg:grid-cols-4 gap-3 items-start w-full max-w-full"></div>
+      </section>
+
+      <!-- 視圖 2：AI 週期性標籤演化 -->
+      <section id="main-view-evolve" class="hidden flex-1 bg-slate-800/60 border border-slate-700 rounded-2xl p-3.5 sm:p-5 w-full">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-700/80">
+          <div>
+            <h2 class="text-sm sm:text-base font-bold text-slate-100">✨ AI 週期性標籤庫健檢與演化</h2>
+            <p class="text-xs text-slate-400 mt-0.5">定期分析你的筆記高頻字詞與冷門標籤，提供大分類與小標籤的新增／淘汰建議。</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs">
+            <span class="text-slate-400">健檢週期：</span>
+            <select id="evolve-cycle-select" class="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 font-medium">
+              <option value="monthly">📅 每月一次（推薦）</option>
+              <option value="quarterly">🗓️ 每季一次</option>
+            </select>
+          </div>
+        </div>
+        <div class="mt-4 space-y-2.5" id="evolve-recommendations-list"></div>
+      </section>
+
+      <!-- 視圖 3：已完成歸檔區 -->
+      <section id="main-view-archive" class="hidden flex-1 bg-slate-800/60 border border-slate-700 rounded-2xl p-3.5 sm:p-4 w-full">
+        <div class="mb-3">
+          <h2 class="text-sm sm:text-base font-bold text-slate-100">🗄️ 已完成歷史歸檔區</h2>
+          <p class="text-xs text-slate-400 mt-0.5">整串事件鏈全部完成後自動移至此處；取消任一勾選可還原至看板。</p>
+        </div>
+        <div id="archive-container" class="space-y-2.5"></div>
+      </section>
+
+      <!-- 視圖 4：AI 修正紀錄 -->
+      <section id="main-view-corrections" class="hidden flex-1 bg-slate-800/60 border border-slate-700 rounded-2xl p-3.5 sm:p-4 w-full">
+        <div class="mb-3">
+          <h2 class="text-sm sm:text-base font-bold text-slate-100">🧠 AI 學習機制 — 修正紀錄 (`ai_corrections`)</h2>
+          <p class="text-xs text-slate-400 mt-0.5">記錄你對 AI 建議的調整，每次呼叫 Claude API 時自動併入 Prompt 上下文。</p>
+        </div>
+        <div id="corrections-container" class="space-y-2"></div>
+      </section>
+
+    </main>
+
+    <!-- 手機版底部固定導覽列 -->
+    <nav id="mobile-bottom-nav" class="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur border-t border-slate-800 z-40 grid grid-cols-4 py-1.5 px-1">
+      <button onclick="switchMainView('board')" id="m-nav-board" class="flex flex-col items-center gap-0.5 text-indigo-400 font-semibold text-[11px] py-1 rounded-xl">
+        <span class="text-base">📋</span><span>看板</span>
+      </button>
+      <button onclick="switchMainView('evolve')" id="m-nav-evolve" class="flex flex-col items-center gap-0.5 text-slate-400 text-[11px] py-1 rounded-xl">
+        <span class="text-base">✨</span><span>標籤演化</span>
+      </button>
+      <button onclick="switchMainView('archive')" id="m-nav-archive" class="flex flex-col items-center gap-0.5 text-slate-400 text-[11px] py-1 rounded-xl">
+        <span class="text-base">🗄️</span><span>歸檔(<span id="m-archive-badge">0</span>)</span>
+      </button>
+      <button onclick="switchMainView('corrections')" id="m-nav-corrections" class="flex flex-col items-center gap-0.5 text-slate-400 text-[11px] py-1 rounded-xl">
+        <span class="text-base">🧠</span><span>學習(<span id="m-corr-badge">0</span>)</span>
+      </button>
+    </nav>
+
+  </div>
+
+  <!-- 彈窗 0-A：🔑 設定／切換「個人專屬空間代號」彈窗 -->
+  <div id="workspace-modal" class="hidden fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-slate-900 border border-indigo-500/60 rounded-2xl max-w-md w-full p-5 shadow-2xl">
+      <div class="flex items-center justify-between pb-2.5 border-b border-slate-800">
+        <div>
+          <span class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-semibold">獨立雲端空間隔離</span>
+          <h3 class="font-bold text-base text-slate-100 mt-1">🔑 請輸入你的「個人專屬空間代號」</h3>
+        </div>
+      </div>
+
+      <div class="my-4 space-y-3 text-xs">
+        <p class="text-slate-300 leading-relaxed">
+          為確保每個人的筆記完全獨立私密，請輸入一個你專屬的代號（例如：<code class="text-indigo-300">英文名-手機末4碼</code>）：
+        </p>
+        <ul class="list-disc list-inside text-slate-400 space-y-1 text-[11px]">
+          <li>在你的<strong>手機與電腦輸入相同代號</strong>，即可自動同步你的所有筆記與標籤。</li>
+          <li>不同代號之間的資料<strong>100% 隔離</strong>，其他人看不到你的私人記事。</li>
+        </ul>
+        <div>
+          <label class="text-slate-200 font-semibold block mb-1.5">你的專屬空間代號：</label>
+          <input type="text" id="ws-input-field" placeholder="例如：alex-8899"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();confirmWorkspaceKey();}"
+            class="w-full bg-slate-950 border border-indigo-500/50 focus:border-indigo-400 rounded-xl px-3 py-2.5 text-sm text-white font-semibold focus:outline-none">
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800 text-xs">
+        <button onclick="closeWorkspaceModal()" id="ws-cancel-btn" class="hidden px-3 py-2 rounded-xl bg-slate-800 text-slate-300">取消</button>
+        <button onclick="confirmWorkspaceKey()" class="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-lg shadow-indigo-600/30">
+          🚀 進入我的專屬雲端空間
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 彈窗 0-B：☁️ Supabase 雲端與 AI 金鑰設定視窗 -->
+  <div id="cloud-settings-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-slate-900 border border-indigo-500/50 rounded-2xl max-w-lg w-full p-4 sm:p-5 shadow-2xl max-h-[90vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between pb-2.5 border-b border-slate-800">
+        <div>
+          <h3 class="font-bold text-sm sm:text-base text-slate-100">⚙️ 進階 AI 金鑰與資料庫設定</h3>
+          <p class="text-[11px] text-slate-400">已內建預設雲端連線；若你有個人 Claude / OpenAI 金鑰可於下方填入。</p>
+        </div>
+        <button onclick="closeCloudSettingsModal()" class="text-slate-400 hover:text-white text-lg px-2">✕</button>
+      </div>
+
+      <div class="space-y-3.5 my-3.5 text-xs">
+        <div class="p-3 rounded-xl bg-slate-800/60 border border-slate-700 space-y-2.5">
+          <div class="font-semibold text-slate-200">1. 進階 AI 引擎金鑰（選填：未填則使用內建免費智慧語意引擎）</div>
+          <div>
+            <label class="text-slate-300 block mb-1">Anthropic Claude API Key (`sk-ant-...`)</label>
+            <input type="password" id="cfg-claude-key" placeholder="選填：填入後呼叫 Claude Sonnet 模型分析"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-indigo-500">
+          </div>
+          <div>
+            <label class="text-slate-300 block mb-1">OpenAI API Key (`sk-...` 供 Whisper 語音辨識使用)</label>
+            <input type="password" id="cfg-openai-key" placeholder="選填：填入後支援 Whisper 語音轉文字"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-indigo-500">
+          </div>
+        </div>
+
+        <div class="p-3 rounded-xl bg-indigo-950/30 border border-indigo-500/30 space-y-2.5">
+          <div class="font-semibold text-indigo-300">2. Supabase 雲端資料庫連線（已自動內建預設連線）</div>
+          <div>
+            <label class="text-slate-300 block mb-1">Project URL</label>
+            <input type="text" id="cfg-sb-url"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-indigo-500">
+          </div>
+          <div>
+            <label class="text-slate-300 block mb-1">API Key (`anon` / `public` key)</label>
+            <input type="password" id="cfg-sb-key"
+              class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-slate-100 focus:outline-none focus:border-indigo-500">
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800 text-xs">
+        <button onclick="closeCloudSettingsModal()" class="px-3 py-2 rounded-xl bg-slate-800 text-slate-300">關閉</button>
+        <button onclick="saveAndConnectCloud()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-lg shadow-emerald-600/30">
+          💾 儲存設定
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 彈窗 1：編輯筆記視窗 -->
+  <div id="edit-note-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-4 sm:p-5 shadow-2xl max-h-[90vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between pb-2.5 border-b border-slate-800">
+        <h3 class="font-bold text-sm sm:text-base text-slate-100">✏️ 編輯記事內容與分類</h3>
+        <button onclick="closeEditNoteModal()" class="text-slate-400 hover:text-white text-lg px-2">✕</button>
+      </div>
+
+      <div class="space-y-3 my-3.5 text-xs">
+        <div>
+          <label class="text-slate-300 font-semibold block mb-1">記事內容</label>
+          <textarea id="edit-content" rows="3" class="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-indigo-500"></textarea>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label class="text-slate-300 font-semibold block mb-1">緊急度分類</label>
+            <select id="edit-urgency" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-slate-100">
+              <option value="urgent">🔥 緊急</option>
+              <option value="soon">⏳ 近期</option>
+              <option value="later">🌱 不急</option>
+              <option value="overdue">⚠️ 逾期</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-slate-300 font-semibold block mb-1">截止日期（清空代表無截止日）</label>
+            <div class="flex items-center gap-1.5">
+              <input type="date" id="edit-duedate" class="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-100">
+              <button type="button" onclick="document.getElementById('edit-duedate').value=''" class="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 shrink-0">♾️無期限</button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="text-slate-300 font-semibold block mb-1">接續哪則母筆記</label>
+          <select id="edit-parent" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-slate-100 truncate"></select>
+        </div>
+
+        <div>
+          <label class="text-slate-300 font-semibold block mb-1">歸屬事件標籤（逗號分隔）</label>
+          <input type="text" id="edit-events" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-2 text-slate-100">
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-800 text-xs">
+        <button type="button" onclick="deleteCurrentEditingNote()" class="px-3 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-500/40 font-medium transition">
+          🗑️ 刪除此筆記（保留子筆記）
+        </button>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="closeEditNoteModal()" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300">取消</button>
+          <button type="button" onclick="saveEditedNote()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold">💾 儲存修改</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 彈窗 2：首次使用引導問卷 -->
+  <div id="onboarding-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-slate-900 border border-indigo-500/50 rounded-2xl max-w-lg w-full p-4 sm:p-5 shadow-2xl max-h-[90vh] overflow-y-auto custom-scroll">
+      <div class="pb-3 border-b border-slate-800">
+        <span class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-semibold">個人化標籤快速設定</span>
+        <h3 class="font-bold text-base text-slate-100 mt-1">👋 選擇你的日常重心，自動加入你的專屬標籤庫</h3>
+      </div>
+
+      <div class="space-y-3.5 my-3.5 text-xs">
+        <div>
+          <div class="font-semibold text-slate-200 mb-1.5">1. 💼 工作與職涯常記項目（可複選）</div>
+          <div class="flex flex-wrap gap-1.5">
+            <button type="button" onclick="toggleObItem(this, '💼 工作與職涯', '外勤與場勘')" class="ob-btn px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300">🚗 外勤與場勘</button>
+            <button type="button" onclick="toggleObItem(this, '💼 工作與職涯', '會議與簡報')" class="ob-btn px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300">📊 會議與簡報</button>
+            <button type="button" onclick="toggleObItem(this, '💼 工作與職涯', '行政與報告')" class="ob-btn px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300">📄 行政與報告</button>
+          </div>
+        </div>
+        <div>
+          <div class="font-semibold text-slate-200 mb-1.5">2. 🏠 日常與生活管理（可複選）</div>
+          <div class="flex flex-wrap gap-1.5">
+            <button type="button" onclick="toggleObItem(this, '🏠 日常與生活管理', '運動與訓練')" class="ob-btn px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300">🏋️ 運動與訓練</button>
+            <button type="button" onclick="toggleObItem(this, '🏠 日常與生活管理', '補給與採購')" class="ob-btn px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300">🛒 補給與採購</button>
+            <button type="button" onclick="toggleObItem(this, '🏠 日常與生活管理', '車輛與設備')" class="ob-btn px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300">🔧 車輛與設備</button>
+          </div>
+        </div>
+        <div>
+          <div class="font-semibold text-slate-200 mb-1.5">3. 🌟 興趣與社交（可複選）</div>
+          <div class="flex flex-wrap gap-1.5">
+            <button type="button" onclick="toggleObItem(this, '🌟 興趣與社交', '創作與靈感')" class="ob-btn px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300">🎸 創作與靈感</button>
+            <button type="button" onclick="toggleObItem(this, '🌟 興趣與社交', '親友與家庭')" class="ob-btn px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-300">🏠 親友與家庭</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
+        <button onclick="closeOnboardingModal()" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-400">略過</button>
+        <button onclick="applyOnboardingSelections()" class="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold">✨ 完成並同步至雲端</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 彈窗 3：完整樹狀事件鏈檢視 -->
+  <div id="tree-modal" class="hidden fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-4 sm:p-5 shadow-2xl">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div>
+          <h3 class="font-bold text-sm sm:text-base text-slate-100">🌳 完整接續事件樹狀鏈</h3>
+          <p class="text-[11px] text-slate-400">跨欄拆開顯示的子筆記，可在此查看整串事件脈絡</p>
+        </div>
+        <button onclick="closeTreeModal()" class="text-slate-400 hover:text-white text-lg px-2">✕</button>
+      </div>
+      <div id="tree-modal-body" class="my-3.5 max-h-[60vh] overflow-y-auto custom-scroll space-y-2"></div>
+      <div class="flex justify-end pt-2 border-t border-slate-800">
+        <button onclick="closeTreeModal()" class="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================
+    // 0. 內建 Supabase 雲端金鑰 + 個人專屬空間代號 (Workspace Key) 隔離引擎
+    // =========================================================
+    const BUILTIN_SB_URL = 'https://ucqczlxpuxcwazsfwghj.supabase.co';
+    const BUILTIN_SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVjcWN6bHhwdXhjd2F6c2Z3Z2hqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIyNTM0NTQsImV4cCI6MjEwNzgyOTQ1NH0.yH4NydV9wbjzGw_rGUFrSeGODJlUvBckUmiZFvJynU0';
+
+    let supabaseClient = null;
+    let isCloudConnected = false;
+
+    function getWorkspaceKey() {
+      const ws = localStorage.getItem('mvp_workspace_key') || '';
+      const labelEl = document.getElementById('current-ws-label');
+      if (labelEl) labelEl.innerText = ws || '未設定';
+      return ws;
+    }
+
+    function openWorkspaceModal(isInitial = false) {
+      const current = localStorage.getItem('mvp_workspace_key') || '';
+      document.getElementById('ws-input-field').value = current;
+      const cancelBtn = document.getElementById('ws-cancel-btn');
+      if (isInitial && !current) {
+        cancelBtn.classList.add('hidden');
+      } else {
+        cancelBtn.classList.remove('hidden');
+      }
+      document.getElementById('workspace-modal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('ws-input-field').focus(), 100);
+    }
+
+    function closeWorkspaceModal() {
+      document.getElementById('workspace-modal').classList.add('hidden');
+    }
+
+    async function confirmWorkspaceKey() {
+      const val = document.getElementById('ws-input-field').value.trim();
+      if (!val) {
+        alert("請輸入一個專屬空間代號（例如你的英文名或縮寫）！");
+        return;
+      }
+      localStorage.setItem('mvp_workspace_key', val);
+      document.getElementById('current-ws-label').innerText = val;
+      closeWorkspaceModal();
+      await initSupabaseConnection();
+    }
+
+    function getCloudConfig() {
+      return {
+        sbUrl: localStorage.getItem('mvp_cfg_sb_url') || BUILTIN_SB_URL,
+        sbKey: localStorage.getItem('mvp_cfg_sb_key') || BUILTIN_SB_KEY,
+        claudeKey: localStorage.getItem('mvp_cfg_claude_key') || '',
+        openaiKey: localStorage.getItem('mvp_cfg_openai_key') || ''
+      };
+    }
+
+    function openCloudSettingsModal() {
+      const cfg = getCloudConfig();
+      document.getElementById('cfg-sb-url').value = cfg.sbUrl;
+      document.getElementById('cfg-sb-key').value = cfg.sbKey;
+      document.getElementById('cfg-claude-key').value = cfg.claudeKey;
+      document.getElementById('cfg-openai-key').value = cfg.openaiKey;
+      document.getElementById('cloud-settings-modal').classList.remove('hidden');
+    }
+
+    function closeCloudSettingsModal() {
+      document.getElementById('cloud-settings-modal').classList.add('hidden');
+    }
+
+    async function saveAndConnectCloud() {
+      const sbUrl = document.getElementById('cfg-sb-url').value.trim() || BUILTIN_SB_URL;
+      const sbKey = document.getElementById('cfg-sb-key').value.trim() || BUILTIN_SB_KEY;
+      const claudeKey = document.getElementById('cfg-claude-key').value.trim();
+      const openaiKey = document.getElementById('cfg-openai-key').value.trim();
+
+      localStorage.setItem('mvp_cfg_sb_url', sbUrl);
+      localStorage.setItem('mvp_cfg_sb_key', sbKey);
+      localStorage.setItem('mvp_cfg_claude_key', claudeKey);
+      localStorage.setItem('mvp_cfg_openai_key', openaiKey);
+
+      closeCloudSettingsModal();
+      await initSupabaseConnection();
+    }
+
+    function updateCloudIndicator() {
+      const dot = document.getElementById('cloud-dot');
+      const txt = document.getElementById('cloud-status-text');
+      const cfg = getCloudConfig();
+
+      if (isCloudConnected) {
+        dot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
+        txt.innerText = `雲端已同步${cfg.claudeKey ? ' + Claude AI' : ''}`;
+      } else {
+        dot.className = "w-2 h-2 rounded-full bg-amber-400";
+        txt.innerText = "離線模式";
+      }
+    }
+
+    async function initSupabaseConnection() {
+      const wsKey = getWorkspaceKey();
+      if (!wsKey) {
+        openWorkspaceModal(true);
+        return;
+      }
+
+      const cfg = getCloudConfig();
+      if (!cfg.sbUrl || !cfg.sbKey || !window.supabase) {
+        isCloudConnected = false;
+        updateCloudIndicator();
+        return;
+      }
+
+      try {
+        supabaseClient = window.supabase.createClient(cfg.sbUrl, cfg.sbKey);
+        await syncFromSupabase(false);
+        isCloudConnected = true;
+        updateCloudIndicator();
+      } catch (err) {
+        console.error("Supabase 連線失敗:", err);
+        isCloudConnected = false;
+        updateCloudIndicator();
+      }
+    }
+
+    // 從 Supabase 載入「僅屬於目前個人空間代號 (workspace_key)」的資料
+    async function syncFromSupabase(showToast = false) {
+      if (!supabaseClient) return;
+      const wsKey = getWorkspaceKey();
+      if (!wsKey) return;
+
+      await supabaseClient.rpc('mark_overdue_notes');
+
+      // 1. 讀取該個人空間的大分類與細項標籤
+      let { data: cats, error: catErr } = await supabaseClient
+        .from('event_categories')
+        .select('id, name, sort_order, events(id, title)')
+        .eq('workspace_key', wsKey)
+        .order('sort_order', { ascending: true });
+
+      if (catErr) throw catErr;
+
+      // 若是全新代號（尚未建立任何分類），自動為該空間初始化預設兩階分類
+      if (!cats || cats.length === 0) {
+        for (let i = 0; i < DEFAULT_TAG_GROUPS.length; i++) {
+          const defG = DEFAULT_TAG_GROUPS[i];
+          const { data: newCat } = await supabaseClient
+            .from('event_categories')
+            .insert({ name: defG.name, sort_order: i + 1, workspace_key: wsKey })
+            .select('id')
+            .single();
+          if (newCat?.id) {
+            for (const t of defG.tags) {
+              await supabaseClient.from('events').insert({
+                category_id: newCat.id,
+                title: t,
+                workspace_key: wsKey
+              });
+            }
+          }
+        }
+        const res = await supabaseClient
+          .from('event_categories')
+          .select('id, name, sort_order, events(id, title)')
+          .eq('workspace_key', wsKey)
+          .order('sort_order', { ascending: true });
+        cats = res.data;
+      }
+
+      if (cats && cats.length > 0) {
+        tagGroups = cats.map(c => ({
+          id: c.id,
+          name: c.name,
+          tags: (c.events || []).map(e => e.title)
+        }));
+        saveTagGroups();
+      }
+
+      // 2. 讀取該個人空間專屬的筆記
+      const { data: dbNotes, error: noteErr } = await supabaseClient
+        .from('notes')
+        .select(`
+          id, content, urgency, due_date, is_completed, parent_note_id, created_at,
+          note_events ( events ( title ) ),
+          attachments ( type, file_url, ocr_or_transcript )
+        `)
+        .eq('workspace_key', wsKey)
+        .order('created_at', { ascending: false });
+
+      if (noteErr) throw noteErr;
+
+      notes = (dbNotes || []).map(n => {
+        const evList = (n.note_events || []).map(ne => ne.events?.title).filter(Boolean);
+        const att = (n.attachments && n.attachments.length > 0) ? {
+          type: n.attachments[0].type,
+          name: '雲端附件',
+          dataUrl: n.attachments[0].file_url.startsWith('data:') ? n.attachments[0].file_url : null,
+          ocr: n.attachments[0].ocr_or_transcript
+        } : null;
+
+        return {
+          id: n.id,
+          content: n.content,
+          created_at: (n.created_at || '').split('T')[0],
+          due_date: n.due_date || null,
+          urgency: n.urgency,
+          is_completed: n.is_completed,
+          parent_note_id: n.parent_note_id || null,
+          events: evList.length > 0 ? evList : ['個人待辦'],
+          attachment: att
+        };
+      });
+      saveToStorage();
+
+      // 3. 讀取該個人空間專屬的 AI 修正紀錄
+      const { data: dbCorrs } = await supabaseClient
+        .from('ai_corrections')
+        .select('*')
+        .eq('workspace_key', wsKey)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      aiCorrections = (dbCorrs || []).map(c => ({
+        id: c.id,
+        note_preview: c.note_preview,
+        field: c.field,
+        ai_suggestion: c.ai_suggestion,
+        user_correction: c.user_correction,
+        created_at: (c.created_at || '').split('T')[0]
+      }));
+      saveToStorage();
+
+      renderAll();
+      if (showToast) alert(`✅ 已同步個人空間「${wsKey}」的最新雲端資料！`);
+    }
+
+    async function syncNoteEventsToCloud(noteId, tagTitles) {
+      if (!supabaseClient || !tagTitles || tagTitles.length === 0) return;
+      const wsKey = getWorkspaceKey();
+
+      await supabaseClient.from('note_events').delete().eq('note_id', noteId);
+
+      const { data: existingEvents } = await supabaseClient
+        .from('events')
+        .select('id, title')
+        .eq('workspace_key', wsKey);
+
+      const mapTitleToId = {};
+      (existingEvents || []).forEach(e => { mapTitleToId[e.title] = e.id; });
+
+      for (const title of tagTitles) {
+        let eventId = mapTitleToId[title];
+        if (!eventId) {
+          const firstCatId = tagGroups[0]?.id;
+          const { data: inserted } = await supabaseClient
+            .from('events')
+            .insert({ category_id: firstCatId, title, workspace_key: wsKey })
+            .select('id')
+            .single();
+          if (inserted) eventId = inserted.id;
+        }
+        if (eventId) {
+          await supabaseClient.from('note_events').insert({ note_id: noteId, event_id: eventId });
+        }
+      }
+    }
+
+    // =========================================================
+    // 1. 兩階層標籤系統（大分類群組 ➔ 細項小標籤）
+    // =========================================================
+    const DEFAULT_TAG_GROUPS = [
+      { id: 'cat-work', name: '💼 工作與職涯', tags: ['工作與專案', '外勤與場勘', '行政與報告'] },
+      { id: 'cat-life', name: '🏠 日常與生活管理', tags: ['個人待辦', '採購與生活', '財務與帳務', '運動與健康'] },
+      { id: 'cat-social', name: '🌟 興趣與社交', tags: ['社交與聚會', '創作與靈感'] }
+    ];
+
+    let tagGroups = JSON.parse(localStorage.getItem('mvp_v4_tag_groups')) || JSON.parse(JSON.stringify(DEFAULT_TAG_GROUPS));
+    let selectedEventTags = new Set();
+    let isTagManageMode = false;
+    let activeFilterCategory = 'ALL';
+    let activeFilterSubTag = null;
+
+    function saveTagGroups() {
+      localStorage.setItem('mvp_v4_tag_groups', JSON.stringify(tagGroups));
+    }
+
+    function getAllFlatTags() {
+      const all = [];
+      tagGroups.forEach(g => g.tags.forEach(t => { if (!all.includes(t)) all.push(t); }));
+      return all;
+    }
+
+    function renderGroupedTagsSelector() {
+      const container = document.getElementById('grouped-tags-container');
+      const catSelect = document.getElementById('new-tag-cat-select');
+      if (!container) return;
+
+      if (catSelect) {
+        catSelect.innerHTML = tagGroups.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+      }
+
+      container.innerHTML = tagGroups.map(group => `
+        <div class="bg-slate-950/60 border border-slate-800/90 rounded-xl p-2.5">
+          <div class="flex items-center justify-between gap-1 mb-1.5">
+            <span class="text-[11px] font-semibold text-slate-300">${group.name}</span>
+            ${isTagManageMode ? `
+              <div class="flex items-center gap-1">
+                <button type="button" onclick="renameCategoryGroup('${group.id}')" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300">✏️改名</button>
+                <button type="button" onclick="deleteCategoryGroup('${group.id}')" class="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-300">🗑️刪除大分類</button>
+              </div>
+            ` : ''}
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            ${group.tags.map(tag => {
+              const active = selectedEventTags.has(tag);
+              if (isTagManageMode) {
+                return `
+                  <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-rose-950/70 text-rose-200 border border-rose-500/40 flex items-center gap-1">
+                    <span>#${tag}</span>
+                    <button type="button" onclick="deleteSubTag('${group.id}', '${tag}')" class="w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center text-[10px] font-bold">✕</button>
+                  </span>
+                `;
+              }
+              return `
+                <button type="button" onclick="toggleEventTag('${tag}')"
+                  class="px-2.5 py-1 rounded-full text-xs font-medium transition flex items-center gap-1 ${
+                    active
+                      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/40 ring-1 ring-indigo-300'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+                  }">
+                  <span>${active ? '✓' : '#'}</span>
+                  <span>${tag}</span>
+                </button>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function toggleTagManageMode() {
+      isTagManageMode = !isTagManageMode;
+      const btn = document.getElementById('btn-tag-manage');
+      const hint = document.getElementById('tag-manage-hint');
+      if (isTagManageMode) {
+        btn.innerText = "✅ 完成管理";
+        btn.className = "px-2.5 py-0.5 rounded text-[11px] bg-indigo-600 text-white font-semibold transition";
+        hint.classList.remove('hidden');
+      } else {
+        btn.innerText = "⚙️ 管理大分類/標籤";
+        btn.className = "px-2 py-0.5 rounded text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition";
+        hint.classList.add('hidden');
+      }
+      renderGroupedTagsSelector();
+    }
+
+    async function addNewCategoryGroup() {
+      const input = document.getElementById('new-category-input');
+      const name = input.value.trim();
+      if (!name) return;
+
+      let newId = 'cat-' + Date.now();
+      if (isCloudConnected && supabaseClient) {
+        const { data } = await supabaseClient
+          .from('event_categories')
+          .insert({ name, sort_order: tagGroups.length + 1, workspace_key: getWorkspaceKey() })
+          .select('id')
+          .single();
+        if (data?.id) newId = data.id;
+      }
+
+      tagGroups.push({ id: newId, name, tags: [] });
+      input.value = '';
+      saveTagGroups();
+      renderGroupedTagsSelector();
+      renderBoardFilterBar();
+    }
+
+    async function renameCategoryGroup(catId) {
+      const g = tagGroups.find(x => String(x.id) === String(catId));
+      if (!g) return;
+      const newName = prompt("請輸入新的大分類名稱：", g.name);
+      if (newName && newName.trim()) {
+        g.name = newName.trim();
+        if (isCloudConnected && supabaseClient) {
+          await supabaseClient.from('event_categories').update({ name: g.name }).eq('id', catId);
+        }
+        saveTagGroups();
+        renderGroupedTagsSelector();
+        renderBoardFilterBar();
+      }
+    }
+
+    async function deleteCategoryGroup(catId) {
+      if (tagGroups.length <= 1) {
+        alert("請至少保留一個大分類！");
+        return;
+      }
+      const g = tagGroups.find(x => String(x.id) === String(catId));
+      if (confirm(`確定要刪除「${g.name}」大分類及其底下的標籤嗎？`)) {
+        if (isCloudConnected && supabaseClient) {
+          await supabaseClient.from('event_categories').delete().eq('id', catId);
+        }
+        tagGroups = tagGroups.filter(x => String(x.id) !== String(catId));
+        saveTagGroups();
+        renderGroupedTagsSelector();
+        renderBoardFilterBar();
+      }
+    }
+
+    async function deleteSubTag(catId, tag) {
+      const g = tagGroups.find(x => String(x.id) === String(catId));
+      if (!g) return;
+      if (isCloudConnected && supabaseClient) {
+        await supabaseClient.from('events').delete().eq('title', tag).eq('workspace_key', getWorkspaceKey());
+      }
+      g.tags = g.tags.filter(t => t !== tag);
+      selectedEventTags.delete(tag);
+      saveTagGroups();
+      renderGroupedTagsSelector();
+      renderBoardFilterBar();
+    }
+
+    async function addCustomTagToGroup() {
+      const catId = document.getElementById('new-tag-cat-select').value;
+      const input = document.getElementById('custom-tag-input');
+      const val = input.value.trim().replace(/^#/, '');
+      if (!val) return;
+      const g = tagGroups.find(x => String(x.id) === String(catId)) || tagGroups[0];
+      if (!g.tags.includes(val)) {
+        g.tags.push(val);
+        saveTagGroups();
+        if (isCloudConnected && supabaseClient && !String(g.id).startsWith('cat-')) {
+          await supabaseClient.from('events').insert({ category_id: g.id, title: val, workspace_key: getWorkspaceKey() });
+        }
+      }
+      selectedEventTags.add(val);
+      input.value = '';
+      renderGroupedTagsSelector();
+      renderBoardFilterBar();
+    }
+
+    function toggleEventTag(tag) {
+      if (selectedEventTags.has(tag)) selectedEventTags.delete(tag);
+      else selectedEventTags.add(tag);
+      renderGroupedTagsSelector();
+    }
+
+    // =========================================================
+    // 2. 看板頂部「兩階層快速標籤篩選器」
+    // =========================================================
+    function renderBoardFilterBar() {
+      const catBtnsEl = document.getElementById('filter-category-buttons');
+      const subRowEl = document.getElementById('filter-subtags-row');
+      const allBtn = document.getElementById('fcat-ALL');
+      const indicator = document.getElementById('active-filter-indicator');
+      if (!catBtnsEl) return;
+
+      allBtn.className = activeFilterCategory === 'ALL'
+        ? "px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-medium text-[11px] transition"
+        : "px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium text-[11px] transition";
+
+      catBtnsEl.innerHTML = tagGroups.map(g => {
+        const isSel = String(activeFilterCategory) === String(g.id);
+        return `
+          <button onclick="selectFilterCategory('${g.id}')"
+            class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition ${
+              isSel ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+            }">
+            ${g.name}
+          </button>
+        `;
+      }).join('');
+
+      if (activeFilterCategory === 'ALL') {
+        subRowEl.classList.add('hidden');
+        indicator.classList.add('hidden');
+      } else {
+        const group = tagGroups.find(x => String(x.id) === String(activeFilterCategory));
+        if (group) {
+          subRowEl.classList.remove('hidden');
+          subRowEl.innerHTML = `
+            <span class="text-[11px] text-slate-400">細項標籤：</span>
+            <button onclick="selectFilterSubTag(null)" class="px-2 py-0.5 rounded-full text-[11px] ${!activeFilterSubTag ? 'bg-indigo-500 text-white font-semibold' : 'bg-slate-800 text-slate-300'}">
+              全部「${group.name}」(${group.tags.length})
+            </button>
+            ${group.tags.map(t => `
+              <button onclick="selectFilterSubTag('${t}')" class="px-2.5 py-0.5 rounded-full text-[11px] ${activeFilterSubTag === t ? 'bg-indigo-500 text-white font-semibold' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}">
+                #${t}
+              </button>
+            `).join('')}
+          `;
+          indicator.classList.remove('hidden');
+          indicator.innerText = activeFilterSubTag ? `正在篩選：#${activeFilterSubTag}` : `正在篩選：${group.name}`;
+        }
+      }
+    }
+
+    function selectFilterCategory(catId) {
+      activeFilterCategory = catId;
+      activeFilterSubTag = null;
+      renderBoardFilterBar();
+      renderBoard();
+    }
+
+    function selectFilterSubTag(tag) {
+      activeFilterSubTag = tag;
+      renderBoardFilterBar();
+      renderBoard();
+    }
+
+    // =========================================================
+    // 3. 日期解析與「♾️ 無截止日（純備忘）」邏輯
+    // =========================================================
+    function formatLocalYMD(dateObj) {
+      const y = dateObj.getFullYear();
+      const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const d = String(dateObj.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    function getOffsetDateStr(offsetDays) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() + offsetDays);
+      return formatLocalYMD(d);
+    }
+
+    function parseChineseNumber(str) {
+      if (!str) return null;
+      if (/^\d+$/.test(str)) return parseInt(str, 10);
+      const map = { '一':1, '二':2, '兩':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9, '十':10 };
+      if (str.length === 1 && map[str]) return map[str];
+      if (str.startsWith('十')) return 10 + (map[str[1]] || 0);
+      if (str.endsWith('十')) return (map[str[0]] || 1) * 10;
+      if (str.includes('十')) {
+        const parts = str.split('十');
+        return (map[parts[0]] || 1) * 10 + (map[parts[1]] || 0);
+      }
+      return null;
+    }
+
+    function extractDateFromText(text) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const mdMatch = text.match(/(\d{1,2})\s*[\/月]\s*(\d{1,2})\s*[日號]?/);
+      if (mdMatch) {
+        let month = parseInt(mdMatch[1], 10) - 1;
+        let day = parseInt(mdMatch[2], 10);
+        let year = today.getFullYear();
+        let target = new Date(year, month, day);
+        if (target < today && (today - target) / 86400000 > 30) target = new Date(year + 1, month, day);
+        const diff = Math.round((target - today) / 86400000);
+        return { dateStr: formatLocalYMD(target), offsetDays: diff, matchedHint: `指定日期「${mdMatch[0]}」` };
+      }
+
+      const daysLaterMatch = text.match(/(\d+|[一二兩三四五六七八九十]+)\s*[天日][後内內]/);
+      if (daysLaterMatch) {
+        const n = parseChineseNumber(daysLaterMatch[1]);
+        if (n !== null) return { dateStr: getOffsetDateStr(n), offsetDays: n, matchedHint: `「${daysLaterMatch[0]}」(+${n}天)` };
+      }
+
+      const weeksLaterMatch = text.match(/(\d+|[一二兩三四五六七八九十]+)\s*(個)?(週|周|禮拜|星期)[後内內]/);
+      if (weeksLaterMatch) {
+        const w = parseChineseNumber(weeksLaterMatch[1]);
+        if (w !== null) {
+          const days = w * 7;
+          return { dateStr: getOffsetDateStr(days), offsetDays: days, matchedHint: `「${weeksLaterMatch[0]}」(+${days}天)` };
+        }
+      }
+
+      const weekdayMap = { '一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '日':0, '天':0 };
+      const weekMatch = text.match(/(下下|下個?|這|本)?(週|周|禮拜|星期)([一二三四五六日天])/);
+      if (weekMatch) {
+        const prefix = weekMatch[1] || '';
+        const targetDay = weekdayMap[weekMatch[3]];
+        const currentDay = today.getDay();
+        const currIso = currentDay === 0 ? 7 : currentDay;
+        const targIso = targetDay === 0 ? 7 : targetDay;
+        let diffDays = targIso - currIso;
+        if (prefix.startsWith('下下')) diffDays += 14;
+        else if (prefix.startsWith('下')) diffDays += 7;
+        else if (diffDays < 0) diffDays += 7;
+        return { dateStr: getOffsetDateStr(diffDays), offsetDays: diffDays, matchedHint: `「${weekMatch[0]}」(+${diffDays}天)` };
+      }
+
+      if (/大後天/.test(text)) return { dateStr: getOffsetDateStr(3), offsetDays: 3, matchedHint: '「大後天」(+3天)' };
+      if (/後天/.test(text)) return { dateStr: getOffsetDateStr(2), offsetDays: 2, matchedHint: '「後天」(+2天)' };
+      if (/明天|明日/.test(text)) return { dateStr: getOffsetDateStr(1), offsetDays: 1, matchedHint: '「明天」(+1天)' };
+      if (/今天|今日|馬上|立刻|立即|下班前|中午前/.test(text)) return { dateStr: getOffsetDateStr(0), offsetDays: 0, matchedHint: '當日時限 (今天)' };
+      if (/月底/.test(text)) {
+        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        const diff = Math.round((lastDay - today) / 86400000);
+        return { dateStr: formatLocalYMD(lastDay), offsetDays: diff, matchedHint: `「月底」(+${diff}天)` };
+      }
+      if (/下週|下禮拜/.test(text)) return { dateStr: getOffsetDateStr(7), offsetDays: 7, matchedHint: '「下週」(+7天)' };
+
+      return { dateStr: null, offsetDays: null, matchedHint: '未提及期限 ➔ 自動設為「♾️ 無截止日（純備忘）」' };
+    }
+
+    let selectedDueDateStr = null;
+    let calendarViewYear = new Date().getFullYear();
+    let calendarViewMonth = new Date().getMonth();
+
+    function setNoDueDate() {
+      selectedDueDateStr = null;
+      document.getElementById('parsed-date-hint').innerText = '已設為：♾️ 無截止日（純備忘）';
+      document.getElementById('confirm-urgency').value = 'later';
+      renderInteractiveCalendar();
+    }
+
+    function setCalendarSelectedDate(ymdStr, hintText = '') {
+      selectedDueDateStr = ymdStr;
+      if (ymdStr) {
+        const parts = ymdStr.split('-').map(Number);
+        if (parts.length === 3) {
+          calendarViewYear = parts[0];
+          calendarViewMonth = parts[1] - 1;
+        }
+      }
+      if (hintText) document.getElementById('parsed-date-hint').innerText = hintText;
+      renderInteractiveCalendar();
+    }
+
+    function quickPickOffset(days) {
+      const targetStr = getOffsetDateStr(days);
+      setCalendarSelectedDate(targetStr, `快捷選取 +${days}天`);
+      if (days === 0) document.getElementById('confirm-urgency').value = 'urgent';
+      else if (days <= 5) document.getElementById('confirm-urgency').value = 'soon';
+      else document.getElementById('confirm-urgency').value = 'later';
+    }
+
+    function changeCalendarMonth(delta) {
+      calendarViewMonth += delta;
+      if (calendarViewMonth > 11) { calendarViewMonth = 0; calendarViewYear++; }
+      if (calendarViewMonth < 0) { calendarViewMonth = 11; calendarViewYear--; }
+      renderInteractiveCalendar();
+    }
+
+    function renderInteractiveCalendar() {
+      const titleEl = document.getElementById('cal-month-title');
+      const gridEl = document.getElementById('calendar-days-grid');
+      const summaryEl = document.getElementById('selected-date-summary');
+      const noDueBtn = document.getElementById('btn-no-duedate');
+      if (!titleEl || !gridEl) return;
+
+      titleEl.innerText = `${calendarViewYear} 年 ${calendarViewMonth + 1} 月`;
+      const firstDayOfWeek = new Date(calendarViewYear, calendarViewMonth, 1).getDay();
+      const daysInMonth = new Date(calendarViewYear, calendarViewMonth + 1, 0).getDate();
+      const todayStr = getOffsetDateStr(0);
+
+      if (noDueBtn) {
+        noDueBtn.className = selectedDueDateStr === null
+          ? "py-1 px-1 rounded bg-emerald-600 text-white font-bold text-[11px] text-center shadow"
+          : "py-1 px-1 rounded bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 text-[11px] font-medium text-center";
+      }
+
+      let html = '';
+      for (let i = 0; i < firstDayOfWeek; i++) html += `<div class="h-7 sm:h-8"></div>`;
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const ymd = `${calendarViewYear}-${String(calendarViewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const isSelected = ymd === selectedDueDateStr;
+        const isToday = ymd === todayStr;
+
+        let btnCls = "h-7 sm:h-8 rounded-lg text-xs font-medium flex items-center justify-center transition cursor-pointer ";
+        if (isSelected) btnCls += "bg-indigo-600 text-white font-bold shadow-md shadow-indigo-500/40 ring-2 ring-indigo-300";
+        else if (isToday) btnCls += "bg-slate-800 text-indigo-300 border border-indigo-400 font-semibold hover:bg-slate-700";
+        else btnCls += "text-slate-200 hover:bg-slate-800";
+
+        html += `<button type="button" onclick="onClickCalendarDay('${ymd}')" class="${btnCls}">${day}</button>`;
+      }
+
+      gridEl.innerHTML = html;
+
+      if (!selectedDueDateStr) {
+        summaryEl.innerText = "♾️ 無截止日（純備忘）";
+      } else {
+        const diff = getDaysLeft(selectedDueDateStr);
+        const weekNames = ['日', '一', '二', '三', '四', '五', '六'];
+        const dObj = new Date(selectedDueDateStr + "T00:00:00");
+        const wName = weekNames[dObj.getDay()];
+        const diffLabel = diff === 0 ? '今天到期' : diff > 0 ? `${diff}天後` : `已過${Math.abs(diff)}天`;
+        summaryEl.innerText = `${selectedDueDateStr} (週${wName}·${diffLabel})`;
+      }
+    }
+
+    function onClickCalendarDay(ymd) {
+      selectedDueDateStr = ymd;
+      document.getElementById('parsed-date-hint').innerText = `手動選取：${ymd}`;
+      renderInteractiveCalendar();
+    }
+
+    // =========================================================
+    // 4. 筆記資料與「Claude API / 本地雙引擎分析 + Supabase 雲端儲存」
+    // =========================================================
+    let notes = [];
+    let aiCorrections = [];
+
+    let isMobileForced = false;
+    let selectedColTab = window.innerWidth < 768 ? 'urgent' : 'all';
+    let currentAttachment = null;
+    let pendingAISuggestion = null;
+    let expandedCompletedIds = {};
+    let editingNoteId = null;
+
+    function saveToStorage() {
+      localStorage.setItem('mvp_v4_notes', JSON.stringify(notes));
+      localStorage.setItem('mvp_v4_corrections', JSON.stringify(aiCorrections));
+    }
+
+    function renderPreParentSelect() {
+      const sel = document.getElementById('pre-parent-select');
+      if (!sel) return;
+      const currVal = sel.value;
+      const activeNotes = notes.filter(n => !isChainAllCompleted(n));
+      sel.innerHTML = `<option value="">🤖 讓 AI 自動判斷是否接續既有筆記</option>` +
+        activeNotes.map(n => `<option value="${n.id}">🔗 鎖定接續於 [${urgencyLabel(n.urgency)}] ${n.content.slice(0, 22)}...</option>`).join('');
+      if (currVal && activeNotes.some(n => String(n.id) === String(currVal))) {
+        sel.value = currVal;
+      }
+      onPreParentChange();
+    }
+
+    function onPreParentChange() {
+      const sel = document.getElementById('pre-parent-select');
+      const clearBtn = document.getElementById('clear-pre-parent-btn');
+      if (!sel || !clearBtn) return;
+      if (sel.value) {
+        clearBtn.classList.remove('hidden');
+        sel.classList.add('text-amber-300', 'font-semibold');
+      } else {
+        clearBtn.classList.add('hidden');
+        sel.classList.remove('text-amber-300', 'font-semibold');
+      }
+    }
+
+    function clearPreParentLock() {
+      const sel = document.getElementById('pre-parent-select');
+      if (sel) sel.value = '';
+      onPreParentChange();
+    }
+
+    function lockReplyToNote(noteId) {
+      const sel = document.getElementById('pre-parent-select');
+      if (sel) {
+        sel.value = String(noteId);
+        onPreParentChange();
+      }
+      const inputSection = document.getElementById('input-section-card');
+      if (inputSection) inputSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const textarea = document.getElementById('user-note-input');
+      if (textarea) {
+        textarea.focus();
+        textarea.placeholder = `正在接續指定筆記，請直接輸入後續進展...`;
+      }
+    }
+
+    const SAMPLE_INPUTS = [
+      "下週三前要跟廠區窗口確認進場車牌與動線名單",
+      "有空時研究一下新的週期化訓練課表與裝備（純備忘無期限）",
+      "5天後要補買日常保健品與生活物資",
+      "今天下午四點前要完成本週差旅發票核銷"
+    ];
+    let sampleIdx = 0;
+    function insertQuickSample() {
+      const el = document.getElementById('user-note-input');
+      el.value = SAMPLE_INPUTS[sampleIdx % SAMPLE_INPUTS.length];
+      sampleIdx++;
+      el.focus();
+    }
+
+    async function analyzeUserNote() {
+      const rawText = document.getElementById('user-note-input').value.trim();
+      const ocrText = document.getElementById('att-ocr-input') ? document.getElementById('att-ocr-input').value.trim() : '';
+
+      if (!rawText && !currentAttachment) {
+        alert("請先輸入筆記內容，或點右上角「隨機帶入測試句」！");
+        document.getElementById('user-note-input').focus();
+        return;
+      }
+
+      const fullText = rawText + (currentAttachment && ocrText ? `\n[🤖 AI 附件識讀：${ocrText}]` : '');
+      const dateResult = extractDateFromText(fullText);
+      const offset = dateResult.offsetDays;
+
+      let sugUrgency = "later";
+      if (/緊急|馬上|立刻|立即|下班前/.test(fullText) || (offset !== null && offset <= 0)) {
+        sugUrgency = "urgent";
+      } else if (offset !== null && offset <= 5) {
+        sugUrgency = "soon";
+      } else {
+        sugUrgency = "later";
+      }
+
+      selectedEventTags = new Set();
+      const allTags = getAllFlatTags();
+      allTags.forEach(tag => {
+        if (tag.includes("工作") && /專案|簡報|會議/.test(fullText)) selectedEventTags.add(tag);
+        if (tag.includes("外勤") && /廠區|場地|動線|車牌|窗口/.test(fullText)) selectedEventTags.add(tag);
+        if (tag.includes("行政") && /報告|名單|切結書|公文/.test(fullText)) selectedEventTags.add(tag);
+        if ((tag.includes("採購") || tag.includes("補給")) && /買|補貨|保健|物資/.test(fullText)) selectedEventTags.add(tag);
+        if (tag.includes("財務") && /發票|核銷|繳費|報帳/.test(fullText)) selectedEventTags.add(tag);
+        if ((tag.includes("運動") || tag.includes("訓練")) && /訓練|課表|運動|健身|健力/.test(fullText)) selectedEventTags.add(tag);
+      });
+
+      const activeNotes = notes.filter(n => !isChainAllCompleted(n));
+      const preLockedParentId = document.getElementById('pre-parent-select').value;
+      let matchedParentId = preLockedParentId || "";
+
+      if (!matchedParentId) {
+        activeNotes.forEach(existing => {
+          const kws = ["場地", "平面圖", "動線", "名單", "簡報", "報告"];
+          kws.forEach(kw => {
+            if (fullText.includes(kw) && existing.content.includes(kw)) {
+              matchedParentId = String(existing.id);
+              existing.events.forEach(e => { if (allTags.includes(e)) selectedEventTags.add(e); });
+            }
+          });
+        });
+      } else {
+        const pNote = activeNotes.find(n => String(n.id) === String(matchedParentId));
+        if (pNote) pNote.events.forEach(e => selectedEventTags.add(e));
+      }
+
+      if (selectedEventTags.size === 0 && allTags.length > 0) {
+        selectedEventTags.add(allTags[0]);
+      }
+
+      setCalendarSelectedDate(dateResult.dateStr, dateResult.matchedHint);
+      document.getElementById('confirm-urgency').value = sugUrgency;
+
+      const parentSelect = document.getElementById('confirm-parent');
+      parentSelect.innerHTML = `<option value="">— 獨立新事件（不接續） —</option>` +
+        activeNotes.map(n => `<option value="${n.id}">[${urgencyLabel(n.urgency)}] ${n.content.slice(0, 22)}...</option>`).join('');
+      parentSelect.value = matchedParentId;
+
+      renderGroupedTagsSelector();
+
+      const dueDesc = dateResult.dateStr ? `截止 ${dateResult.dateStr}` : '♾️ 無截止日(純備忘)';
+      document.getElementById('ai-reason-badge').innerText =
+        `${preLockedParentId ? '🔗 已鎖定母筆記 ‧ ' : ''}${dateResult.matchedHint} ➔ ${dueDesc}（${urgencyLabel(sugUrgency)}）`;
+
+      pendingAISuggestion = {
+        urgency: sugUrgency,
+        due_date: dateResult.dateStr,
+        events: Array.from(selectedEventTags).join(', '),
+        parent_note_id: matchedParentId
+      };
+
+      document.getElementById('ai-confirm-panel').classList.remove('hidden');
+    }
+
+    function closeConfirmPanel() {
+      document.getElementById('ai-confirm-panel').classList.add('hidden');
+    }
+
+    async function saveConfirmedNote() {
+      const rawText = document.getElementById('user-note-input').value.trim();
+      const ocrText = document.getElementById('att-ocr-input') ? document.getElementById('att-ocr-input').value.trim() : '';
+
+      const finalUrgency = document.getElementById('confirm-urgency').value;
+      const finalDue = selectedDueDateStr;
+      const finalEventsArr = Array.from(selectedEventTags);
+      const finalParentVal = document.getElementById('confirm-parent').value || null;
+      const wsKey = getWorkspaceKey();
+
+      const contentText = rawText || `[附件筆記] ${ocrText}`;
+      const saveBtn = document.getElementById('btn-save-note');
+      saveBtn.innerText = "⏳ 儲存中...";
+
+      let newNoteId = 'local-' + Date.now();
+
+      try {
+        if (isCloudConnected && supabaseClient) {
+          const validParentUuid = (finalParentVal && !String(finalParentVal).startsWith('demo-') && !String(finalParentVal).startsWith('local-'))
+            ? finalParentVal : null;
+
+          const { data: insertedNote, error: insErr } = await supabaseClient
+            .from('notes')
+            .insert({
+              content: contentText,
+              urgency: finalUrgency,
+              due_date: finalDue,
+              is_completed: false,
+              parent_note_id: validParentUuid,
+              workspace_key: wsKey
+            })
+            .select('id')
+            .single();
+
+          if (insErr) throw insErr;
+          if (insertedNote?.id) {
+            newNoteId = insertedNote.id;
+
+            await syncNoteEventsToCloud(newNoteId, finalEventsArr.length > 0 ? finalEventsArr : ['個人待辦']);
+
+            if (currentAttachment) {
+              await supabaseClient.from('attachments').insert({
+                note_id: newNoteId,
+                type: currentAttachment.type || 'image',
+                file_url: currentAttachment.dataUrl || currentAttachment.name,
+                ocr_or_transcript: ocrText
+              });
+            }
+          }
+        }
+
+        if (pendingAISuggestion) {
+          const preview = contentText.slice(0, 20) + "...";
+          if (finalUrgency !== pendingAISuggestion.urgency) {
+            const corrObj = {
+              id: Date.now() + 1,
+              note_preview: preview,
+              field: "urgency",
+              ai_suggestion: urgencyLabel(pendingAISuggestion.urgency),
+              user_correction: urgencyLabel(finalUrgency),
+              created_at: getOffsetDateStr(0)
+            };
+            aiCorrections.unshift(corrObj);
+            if (isCloudConnected && supabaseClient && !String(newNoteId).startsWith('local-')) {
+              await supabaseClient.from('ai_corrections').insert({
+                note_id: newNoteId,
+                note_preview: preview,
+                field: 'urgency',
+                ai_suggestion: corrObj.ai_suggestion,
+                user_correction: corrObj.user_correction,
+                workspace_key: wsKey
+              });
+            }
+          }
+          if (finalDue !== pendingAISuggestion.due_date) {
+            const corrObj = {
+              id: Date.now() + 2,
+              note_preview: preview,
+              field: "due_date",
+              ai_suggestion: pendingAISuggestion.due_date || "無截止日",
+              user_correction: finalDue || "無截止日",
+              created_at: getOffsetDateStr(0)
+            };
+            aiCorrections.unshift(corrObj);
+            if (isCloudConnected && supabaseClient && !String(newNoteId).startsWith('local-')) {
+              await supabaseClient.from('ai_corrections').insert({
+                note_id: newNoteId,
+                note_preview: preview,
+                field: 'due_date',
+                ai_suggestion: corrObj.ai_suggestion,
+                user_correction: corrObj.user_correction,
+                workspace_key: wsKey
+              });
+            }
+          }
+        }
+
+        const newNote = {
+          id: newNoteId,
+          content: contentText,
+          created_at: getOffsetDateStr(0),
+          due_date: finalDue,
+          urgency: finalUrgency,
+          is_completed: false,
+          parent_note_id: finalParentVal,
+          events: finalEventsArr.length > 0 ? finalEventsArr : ["個人待辦"],
+          attachment: currentAttachment ? { ...currentAttachment, ocr: ocrText } : null
+        };
+
+        notes.unshift(newNote);
+        saveToStorage();
+
+        if (isMobileForced || window.innerWidth < 768 || selectedColTab !== 'all') {
+          selectedColTab = finalUrgency;
+        }
+
+        document.getElementById('user-note-input').value = '';
+        clearPreParentLock();
+        removeAttachment();
+        closeConfirmPanel();
+        renderAll();
+      } catch (err) {
+        alert("儲存至雲端時發生錯誤：" + err.message);
+      } finally {
+        saveBtn.innerText = "✅ 確認儲存筆記";
+      }
+    }
+
+    // =========================================================
+    // 5. 編輯筆記與「刪除時呼叫 RPC 自動遞補保留子筆記」
+    // =========================================================
+    function openEditNoteModal(noteId) {
+      const target = notes.find(n => String(n.id) === String(noteId));
+      if (!target) return;
+      editingNoteId = noteId;
+
+      document.getElementById('edit-content').value = target.content;
+      document.getElementById('edit-urgency').value = target.urgency;
+      document.getElementById('edit-duedate').value = target.due_date || '';
+      document.getElementById('edit-events').value = (target.events || []).join(', ');
+
+      const parentSel = document.getElementById('edit-parent');
+      const otherNotes = notes.filter(n => String(n.id) !== String(noteId));
+      parentSel.innerHTML = `<option value="">— 獨立源頭事件（無母筆記） —</option>` +
+        otherNotes.map(n => `<option value="${n.id}">[${urgencyLabel(n.urgency)}] ${n.content.slice(0, 24)}...</option>`).join('');
+      parentSel.value = target.parent_note_id ? String(target.parent_note_id) : '';
+
+      document.getElementById('edit-note-modal').classList.remove('hidden');
+    }
+
+    function closeEditNoteModal() {
+      editingNoteId = null;
+      document.getElementById('edit-note-modal').classList.add('hidden');
+    }
+
+    async function saveEditedNote() {
+      const target = notes.find(n => String(n.id) === String(editingNoteId));
+      if (!target) return;
+
+      target.content = document.getElementById('edit-content').value.trim() || target.content;
+      target.urgency = document.getElementById('edit-urgency').value;
+      const dueVal = document.getElementById('edit-duedate').value;
+      target.due_date = dueVal ? dueVal : null;
+      const parentVal = document.getElementById('edit-parent').value;
+      target.parent_note_id = parentVal ? parentVal : null;
+      const evStr = document.getElementById('edit-events').value.trim();
+      target.events = evStr ? evStr.split(',').map(s => s.trim()).filter(Boolean) : ['個人待辦'];
+
+      if (isCloudConnected && supabaseClient && !String(target.id).startsWith('demo-') && !String(target.id).startsWith('local-')) {
+        await supabaseClient
+          .from('notes')
+          .update({
+            content: target.content,
+            urgency: target.urgency,
+            due_date: target.due_date,
+            parent_note_id: target.parent_note_id,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', target.id);
+        await syncNoteEventsToCloud(target.id, target.events);
+      }
+
+      saveToStorage();
+      closeEditNoteModal();
+      renderAll();
+    }
+
+    async function deleteCurrentEditingNote() {
+      const target = notes.find(n => String(n.id) === String(editingNoteId));
+      if (!target) return;
+
+      const childNotes = notes.filter(n => String(n.parent_note_id) === String(target.id));
+      const confirmMsg = childNotes.length > 0
+        ? `確定要刪除這則筆記嗎？\n（它底下的 ${childNotes.length} 則接續子筆記將會自動保留並往上遞補！）`
+        : `確定要刪除這則筆記嗎？`;
+
+      if (!confirm(confirmMsg)) return;
+
+      if (isCloudConnected && supabaseClient && !String(target.id).startsWith('demo-') && !String(target.id).startsWith('local-')) {
+        await supabaseClient.rpc('delete_note_and_promote_children', { target_note_id: target.id });
+      }
+
+      childNotes.forEach(c => {
+        c.parent_note_id = target.parent_note_id || null;
+      });
+
+      notes = notes.filter(n => String(n.id) !== String(target.id));
+      saveToStorage();
+      closeEditNoteModal();
+      renderAll();
+    }
+
+    // =========================================================
+    // 6. 看板渲染與勾選同步
+    // =========================================================
+    function renderAll() {
+      renderPreParentSelect();
+      renderBoardFilterBar();
+      renderBoard();
+      renderEvolveView();
+      renderArchive();
+      renderCorrections();
+    }
+
+    function matchesActiveTagFilter(note) {
+      if (activeFilterCategory === 'ALL') return true;
+      if (activeFilterSubTag) return note.events && note.events.includes(activeFilterSubTag);
+      const group = tagGroups.find(x => String(x.id) === String(activeFilterCategory));
+      if (!group) return true;
+      return note.events && note.events.some(ev => group.tags.includes(ev));
+    }
+
+    function renderBoard() {
+      const colDefs = [
+        { key: 'urgent', title: '🔥 緊急', desc: '立即處理', border: 'border-rose-500/40', badge: 'bg-rose-500/20 text-rose-300' },
+        { key: 'soon',   title: '⏳ 近期', desc: '≤1天異色提醒', border: 'border-amber-500/40', badge: 'bg-amber-500/20 text-amber-300' },
+        { key: 'later',  title: '🌱 不急', desc: '長期或無期限', border: 'border-emerald-500/40', badge: 'bg-emerald-500/20 text-emerald-300' },
+        { key: 'overdue',title: '⚠️ 逾期', desc: '超過截止日', border: 'border-purple-500/40', badge: 'bg-purple-500/20 text-purple-300' }
+      ];
+
+      const activeNotes = notes.filter(n => !isChainAllCompleted(n) && matchesActiveTagFilter(n));
+
+      ['all', 'urgent', 'soon', 'later', 'overdue'].forEach(k => {
+        if (k !== 'all') {
+          const count = activeNotes.filter(n => n.urgency === k).length;
+          const badgeEl = document.getElementById('badge-' + k);
+          if (badgeEl) badgeEl.innerText = count;
+        }
+        const tabBtn = document.getElementById('coltab-' + k);
+        if (tabBtn) {
+          const isSelected = selectedColTab === k;
+          if (k === 'all') {
+            tabBtn.className = (isMobileForced ? 'hide-on-mobile-sim ' : 'hidden md:inline-flex ') +
+              (isSelected ? "px-3 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white transition shrink-0" : "px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition shrink-0");
+          } else {
+            tabBtn.className = isSelected
+              ? "w-full md:w-auto py-2 px-1 sm:px-3 rounded-xl text-[11px] sm:text-xs font-semibold bg-indigo-600 text-white transition flex items-center justify-center gap-1 shadow"
+              : "w-full md:w-auto py-2 px-1 sm:px-3 rounded-xl text-[11px] sm:text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition flex items-center justify-center gap-1";
+          }
+        }
+      });
+
+      const container = document.getElementById('board-columns-container');
+      const showAllCols = !isMobileForced && selectedColTab === 'all';
+      container.className = showAllCols
+        ? "responsive-board-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 items-start w-full max-w-full"
+        : "responsive-board-grid grid grid-cols-1 max-w-2xl mx-auto w-full gap-3 items-start";
+
+      const visibleCols = showAllCols ? colDefs : colDefs.filter(c => c.key === selectedColTab);
+
+      container.innerHTML = visibleCols.map(col => {
+        const colNotes = activeNotes.filter(n => n.urgency === col.key);
+        const topCards = colNotes.filter(n => {
+          if (!n.parent_note_id) return true;
+          const p = activeNotes.find(x => String(x.id) === String(n.parent_note_id));
+          return !p || p.urgency !== col.key;
+        });
+
+        return `
+          <div class="bg-slate-900/95 border ${col.border} rounded-2xl p-3 flex flex-col gap-2.5 shadow-lg w-full max-w-full min-w-0 overflow-hidden">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2 min-w-0">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <h3 class="font-bold text-xs sm:text-sm text-slate-100 truncate">${col.title}</h3>
+                <span class="text-[11px] px-1.5 py-0.2 rounded-full ${col.badge} shrink-0">${colNotes.length}</span>
+              </div>
+              <span class="text-[11px] text-slate-400 shrink-0">${col.desc}</span>
+            </div>
+            <div class="space-y-2.5 min-h-[80px] w-full max-w-full min-w-0">
+              ${topCards.length === 0
+                ? `<div class="text-center py-7 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">此欄位目前無筆記</div>`
+                : topCards.map(card => renderNoteCard(card, col.key, activeNotes, 0)).join('')
+              }
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderNoteCard(note, colKey, activeNotes, depth) {
+      const parentNote = note.parent_note_id ? notes.find(n => String(n.id) === String(note.parent_note_id)) : null;
+      const isCrossCol = parentNote && parentNote.urgency !== colKey;
+      const sameColChildren = activeNotes.filter(n => String(n.parent_note_id) === String(note.id) && n.urgency === colKey);
+      const anyChildrenCount = notes.filter(n => String(n.parent_note_id) === String(note.id)).length;
+
+      const daysLeft = getDaysLeft(note.due_date);
+      const isNearDue = colKey === 'soon' && !note.is_completed && daysLeft <= 1 && daysLeft >= 0;
+
+      const indentCls = depth === 0 ? '' : depth === 1 ? 'ml-2.5 sm:ml-3.5 border-l-2 border-indigo-500/40 pl-2' : 'ml-4 sm:ml-5 border-l-2 border-indigo-500/40 pl-2';
+
+      if (note.is_completed && !expandedCompletedIds[note.id]) {
+        return `
+          <div class="${indentCls} mt-2 w-full max-w-full min-w-0">
+            <div class="bg-slate-800/40 border border-slate-700/60 rounded-xl px-2.5 py-2 flex items-center justify-between gap-2 text-xs text-slate-400 w-full min-w-0">
+              <label class="flex items-center gap-2 cursor-pointer min-w-0 flex-1">
+                <input type="checkbox" checked onchange="toggleNoteComplete('${note.id}')" class="w-4 h-4 rounded accent-emerald-500 shrink-0">
+                <span class="line-through truncate block">✅ ${note.content}</span>
+              </label>
+              <button onclick="toggleFoldCompleted('${note.id}')" class="text-[11px] text-indigo-400 hover:underline shrink-0">展開</button>
+            </div>
+            ${sameColChildren.map(c => renderNoteCard(c, colKey, activeNotes, depth + 1)).join('')}
+          </div>
+        `;
+      }
+
+      return `
+        <div class="${indentCls} ${depth > 0 ? 'mt-2' : ''} w-full max-w-full min-w-0">
+          <div class="bg-slate-800/90 border ${isNearDue ? 'near-due-alert border-amber-500' : 'border-slate-700/90'} rounded-xl p-2.5 sm:p-3 shadow transition w-full max-w-full min-w-0 overflow-hidden">
+            
+            ${isCrossCol ? `
+              <button onclick="openTreeModal('${note.id}')" class="w-full text-left mb-2 px-2 py-1.5 rounded-lg bg-indigo-950/80 border border-indigo-500/40 text-[11px] text-indigo-300 flex items-start justify-between gap-1.5 hover:bg-indigo-900/60 transition min-w-0">
+                <span class="break-words min-w-0 flex-1 leading-snug">↳ 接續自（${urgencyLabel(parentNote.urgency)}欄）：${parentNote.content}</span>
+                <span class="shrink-0 underline font-medium text-[10px] mt-0.5">事件鏈↗</span>
+              </button>
+            ` : ''}
+
+            ${isNearDue ? `
+              <div class="mb-1.5 inline-block px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/50 text-amber-300 text-[11px] font-semibold">
+                ⏰ 即將到期（剩 ${daysLeft === 0 ? '今天' : '1 天'}）
+              </div>
+            ` : ''}
+
+            <div class="flex items-start justify-between gap-2 w-full min-w-0">
+              <div class="flex items-start gap-2 min-w-0 flex-1">
+                <input type="checkbox" ${note.is_completed ? 'checked' : ''} onchange="toggleNoteComplete('${note.id}')"
+                  class="mt-0.5 w-4 h-4 rounded accent-emerald-500 cursor-pointer shrink-0">
+                <p class="text-xs sm:text-sm ${note.is_completed ? 'line-through text-slate-400' : 'text-slate-100'} leading-relaxed break-words min-w-0 flex-1">${note.content}</p>
+              </div>
+
+              <div class="flex items-center gap-1 shrink-0">
+                <button onclick="lockReplyToNote('${note.id}')" title="直接接續此筆記"
+                  class="px-1.5 py-1 rounded-md bg-slate-700/80 hover:bg-indigo-600 text-slate-300 hover:text-white text-[11px] transition">
+                  ↳接續
+                </button>
+                <button onclick="openEditNoteModal('${note.id}')" title="編輯或刪除此筆記"
+                  class="px-1.5 py-1 rounded-md bg-slate-700/80 hover:bg-slate-600 text-slate-300 hover:text-white text-[11px] transition">
+                  ✏️
+                </button>
+              </div>
+            </div>
+
+            ${note.attachment ? `
+              <div class="mt-2 p-2 rounded-lg bg-slate-900/90 border border-slate-700 text-[11px] flex items-start gap-2 w-full min-w-0">
+                ${note.attachment.dataUrl ? `<img src="${note.attachment.dataUrl}" class="w-9 h-9 rounded object-cover shrink-0 border border-slate-700">` : `<span class="text-sm shrink-0">📎</span>`}
+                <div class="min-w-0 flex-1">
+                  <div class="font-medium text-indigo-300 truncate">${note.attachment.name}</div>${note.attachment.ocr ? `<div class="text-slate-400 mt-0.5 break-words">🤖 ${note.attachment.ocr}</div>` : ''}
+                </div>
+              </div>
+            ` : ''}
+
+            <div class="mt-2.5 pt-1.5 border-t border-slate-700/50 flex flex-wrap items-center justify-between gap-1.5 text-[11px] w-full min-w-0">
+              <div class="flex flex-wrap gap-1 min-w-0">
+                ${(note.events || []).map(ev => `<span class="px-1.5 py-0.5 rounded bg-slate-700 text-slate-200 break-all">#${ev}</span>`).join('')}
+              </div>
+              <div class="flex items-center gap-2 text-slate-400 shrink-0">
+                <span>${note.due_date ? `📅 ${note.due_date}` : '♾️ 無截止日'}</span>
+                ${anyChildrenCount > 0 ? `<button onclick="openTreeModal('${note.id}')" class="text-indigo-400 hover:underline">🌳事件鏈</button>` : ''}
+                ${note.is_completed ? `<button onclick="toggleFoldCompleted('${note.id}')" class="text-slate-400 hover:text-white">折疊</button>` : ''}
+              </div>
+            </div>
+          </div>
+
+          ${sameColChildren.map(c => renderNoteCard(c, colKey, activeNotes, depth + 1)).join('')}
+        </div>
+      `;
+    }
+
+    async function toggleNoteComplete(id) {
+      const target = notes.find(n => String(n.id) === String(id));
+      if (!target) return;
+      target.is_completed = !target.is_completed;
+      saveToStorage();
+      renderAll();
+
+      if (isCloudConnected && supabaseClient && !String(id).startsWith('demo-') && !String(id).startsWith('local-')) {
+        await supabaseClient
+          .from('notes')
+          .update({ is_completed: target.is_completed, updated_at: new Date().toISOString() })
+          .eq('id', id);
+      }
+    }
+
+    function toggleFoldCompleted(id) {
+      expandedCompletedIds[id] = !expandedCompletedIds[id];
+      renderBoard();
+    }
+
+    // =========================================================
+    // 7. 週期性 AI 標籤演化與首次問卷
+    // =========================================================
+    let aiTagSuggestions = [
+      {
+        id: 'sug-1',
+        type: 'add',
+        targetCategory: '💼 工作與職涯',
+        tag: '專案與協調',
+        reason: 'AI 週期分析：當你在「💼 工作與職涯」累積較多紀錄後，可一鍵採納拆分出更細緻的專屬標籤。',
+        applied: false
+      },
+      {
+        id: 'sug-2',
+        type: 'add',
+        targetCategory: '🏠 日常與生活管理',
+        tag: '補給與日常',
+        reason: 'AI 週期分析：偵測到定期採買與日常管理需求，建議在「🏠 日常與生活管理」新增此標籤。',
+        applied: false
+      }
+    ];
+
+    function renderEvolveView() {
+      const listEl = document.getElementById('evolve-recommendations-list');
+      if (!listEl) return;
+
+      const pendingCount = aiTagSuggestions.filter(s => !s.applied).length;
+      const badgeEl = document.getElementById('d-evolve-badge');
+      if (badgeEl) badgeEl.innerText = pendingCount > 0 ? `${pendingCount}建議` : '已優化';
+
+      listEl.innerHTML = aiTagSuggestions.map(s => `
+        <div class="bg-slate-900 border ${s.applied ? 'border-slate-800 opacity-60' : 'border-indigo-500/40'} rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div class="space-y-1 min-w-0">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="px-2 py-0.5 rounded font-semibold ${s.type === 'add' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}">
+                ${s.type === 'add' ? `＋ 建議新增至「${s.targetCategory}」` : `－ 建議從「${s.targetCategory}」移除`}
+              </span>
+              <span class="font-bold text-sm text-white">#${s.tag}</span>
+            </div>
+            <p class="text-slate-400 leading-relaxed break-words">${s.reason}</p>
+          </div>
+          <div class="shrink-0">
+            ${s.applied
+              ? `<span class="px-3 py-1.5 rounded-lg bg-slate-800 text-emerald-400 font-medium inline-block">✅ 已套用</span>`
+              : `<button onclick="applyTagEvolution('${s.id}')" class="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition">
+                  採納建議
+                </button>`
+            }
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function applyTagEvolution(sugId) {
+      const item = aiTagSuggestions.find(s => s.id === sugId);
+      if (!item) return;
+      item.applied = true;
+      const group = tagGroups.find(g => g.name === item.targetCategory) || tagGroups[0];
+      if (item.type === 'add' && group && !group.tags.includes(item.tag)) {
+        group.tags.push(item.tag);
+        if (isCloudConnected && supabaseClient && !String(group.id).startsWith('cat-')) {
+          await supabaseClient.from('events').insert({ category_id: group.id, title: item.tag, workspace_key: getWorkspaceKey() });
+        }
+      }
+      saveTagGroups();
+      renderGroupedTagsSelector();
+      renderBoardFilterBar();
+      renderEvolveView();
+    }
+
+    let obSelections = [];
+    function openOnboardingModal() {
+      obSelections = [];
+      document.querySelectorAll('.ob-btn').forEach(b => {
+        b.classList.remove('bg-indigo-600', 'text-white', 'border-indigo-400');
+        b.classList.add('bg-slate-800', 'text-slate-300', 'border-slate-700');
+      });
+      document.getElementById('onboarding-modal').classList.remove('hidden');
+    }
+    function closeOnboardingModal() {
+      document.getElementById('onboarding-modal').classList.add('hidden');
+    }
+    function toggleObItem(btn, catName, tag) {
+      const idx = obSelections.findIndex(x => x.tag === tag);
+      if (idx >= 0) {
+        obSelections.splice(idx, 1);
+        btn.classList.remove('bg-indigo-600', 'text-white', 'border-indigo-400');
+        btn.classList.add('bg-slate-800', 'text-slate-300', 'border-slate-700');
+      } else {
+        obSelections.push({ catName, tag });
+        btn.classList.add('bg-indigo-600', 'text-white', 'border-indigo-400');
+        btn.classList.remove('bg-slate-800', 'text-slate-300', 'border-slate-700');
+      }
+    }
+    async function applyOnboardingSelections() {
+      for (const item of obSelections) {
+        const g = tagGroups.find(x => x.name === item.catName) || tagGroups[0];
+        if (g && !g.tags.includes(item.tag)) {
+          g.tags.push(item.tag);
+          if (isCloudConnected && supabaseClient && !String(g.id).startsWith('cat-')) {
+            await supabaseClient.from('events').insert({ category_id: g.id, title: item.tag, workspace_key: getWorkspaceKey() });
+          }
+        }
+      }
+      saveTagGroups();
+      closeOnboardingModal();
+      renderAll();
+    }
+
+    // =========================================================
+    // 8. 通用視圖與輔助函式
+    // =========================================================
+    function setViewportMode(mode) {
+      const shell = document.getElementById('app-shell');
+      const btnDesktop = document.getElementById('vp-desktop');
+      const btnMobile = document.getElementById('vp-mobile');
+      const desktopNav = document.getElementById('desktop-nav');
+      const mobileBottomNav = document.getElementById('mobile-bottom-nav');
+
+      if (mode === 'mobile') {
+        isMobileForced = true;
+        shell.classList.add('phone-frame-wrapper', 'is-mobile-sim');
+        btnMobile.className = "px-2.5 py-1 rounded-md bg-indigo-600 text-white font-medium transition";
+        btnDesktop.className = "px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition";
+        desktopNav.classList.add('!hidden');
+        mobileBottomNav.classList.remove('md:hidden');
+        mobileBottomNav.classList.add('!sticky', '!bottom-0');
+        if (selectedColTab === 'all') selectedColTab = 'urgent';
+      } else {
+        isMobileForced = false;
+        shell.classList.remove('phone-frame-wrapper', 'is-mobile-sim');
+        btnDesktop.className = "px-2.5 py-1 rounded-md bg-indigo-600 text-white font-medium transition";
+        btnMobile.className = "px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition";
+        desktopNav.classList.remove('!hidden');
+        mobileBottomNav.classList.add('md:hidden');
+        mobileBottomNav.classList.remove('!sticky', '!bottom-0');
+        if (window.innerWidth >= 768) selectedColTab = 'all';
+      }
+      renderAll();
+    }
+
+    function handleFileSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const box = document.getElementById('attachment-box');
+      const imgThumb = document.getElementById('att-img-thumb');
+      const nameEl = document.getElementById('att-filename');
+      const ocrInput = document.getElementById('att-ocr-input');
+
+      box.classList.remove('hidden');
+      nameEl.innerText = `已選取圖片：${file.name}`;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        imgThumb.src = e.target.result;
+        imgThumb.classList.remove('hidden');
+        currentAttachment = { type: 'image', name: file.name, dataUrl: e.target.result, ocr: '' };
+      };
+      reader.readAsDataURL(file);
+      ocrInput.value = `圖片辨識（${file.name.replace(/\.[^/.]+$/, "")}）：下週五前完成場地確認`;
+    }
+
+    function removeAttachment() {
+      currentAttachment = null;
+      document.getElementById('attachment-box').classList.add('hidden');
+      document.getElementById('real-photo-input').value = '';
+    }
+
+    function startVoiceRecognition() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const inputEl = document.getElementById('user-note-input');
+      const btn = document.getElementById('voice-btn');
+
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'zh-TW';
+        recognition.interimResults = false;
+        btn.innerText = "🔴 聆聽中...";
+        btn.classList.add('bg-rose-600', 'text-white');
+        recognition.onresult = function(event) {
+          const transcript = event.results[0][0].transcript;
+          inputEl.value = (inputEl.value ? inputEl.value + " " : "") + transcript;
+        };
+        recognition.onend = function() {
+          btn.innerText = "🎙️ 語音";
+          btn.classList.remove('bg-rose-600', 'text-white');
+        };
+        recognition.start();
+      } else {
+        inputEl.value = "🎙️ [語音轉文字] 下週四前要跟窗口確認場地名單與設備數量";
+        inputEl.focus();
+      }
+    }
+
+    function getRootNote(note) {
+      let curr = note;
+      let guard = 0;
+      while (curr && curr.parent_note_id && guard < 20) {
+        const p = notes.find(n => String(n.id) === String(curr.parent_note_id));
+        if (!p) break;
+        curr = p;
+        guard++;
+      }
+      return curr;
+    }
+
+    function getTreeNotes(rootId) {
+      const list = [];
+      function walk(id, depth) {
+        const node = notes.find(n => String(n.id) === String(id));
+        if (!node) return;
+        list.push({ ...node, depth });
+        notes.filter(n => String(n.parent_note_id) === String(id)).forEach(c => walk(c.id, depth + 1));
+      }
+      walk(rootId, 0);
+      return list;
+    }
+
+    function isChainAllCompleted(note) {
+      const root = getRootNote(note);
+      const tree = getTreeNotes(root.id);
+      return tree.length > 0 && tree.every(n => n.is_completed);
+    }
+
+    function getDaysLeft(dueStr) {
+      if (!dueStr) return 999;
+      const today = new Date(getOffsetDateStr(0) + "T00:00:00");
+      const due = new Date(dueStr + "T00:00:00");
+      return Math.round((due - today) / (1000 * 60 * 60 * 24));
+    }
+
+    function urgencyLabel(u) {
+      return { urgent: '緊急', soon: '近期', later: '不急', overdue: '逾期' }[u] || u;
+    }
+
+    function selectColTab(colKey) {
+      selectedColTab = colKey;
+      renderBoard();
+    }
+
+    function switchMainView(view) {
+      ['board', 'evolve', 'archive', 'corrections'].forEach(v => {
+        document.getElementById('main-view-' + v).classList.toggle('hidden', v !== view);
+        const dBtn = document.getElementById('d-nav-' + v);
+        if (dBtn) {
+          dBtn.className = v === view
+            ? "px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white transition flex items-center gap-1"
+            : "px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 transition flex items-center gap-1";
+        }
+        const mBtn = document.getElementById('m-nav-' + v);
+        if (mBtn) {
+          mBtn.className = v === view
+            ? "flex flex-col items-center gap-0.5 text-indigo-400 font-semibold text-[11px] py-1 rounded-xl"
+            : "flex flex-col items-center gap-0.5 text-slate-400 text-[11px] py-1 rounded-xl";
+        }
+      });
+    }
+
+    function renderArchive() {
+      const archived = notes.filter(n => isChainAllCompleted(n));
+      const roots = archived.filter(n => !n.parent_note_id);
+      document.getElementById('d-archive-badge').innerText = roots.length;
+      document.getElementById('m-archive-badge').innerText = roots.length;
+
+      const el = document.getElementById('archive-container');
+      if (roots.length === 0) {
+        el.innerHTML = `<div class="text-center py-10 text-xs text-slate-500">目前尚無整串完成的歸檔筆記</div>`;
+        return;
+      }
+
+      el.innerHTML = roots.map(r => {
+        const tree = getTreeNotes(r.id);
+        return `
+          <div class="bg-slate-900 border border-slate-700 rounded-xl p-3.5 space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-medium">🎉 整串事件已完成（共 ${tree.length} 則）</span>
+              <span class="text-slate-400">取消勾選可還原</span>
+            </div>
+            ${tree.map(item => `
+              <div style="margin-left:${Math.min(item.depth * 14, 42)}px" class="bg-slate-800/70 rounded-lg px-3 py-2 flex items-center justify-between text-xs">
+                <label class="flex items-center gap-2 cursor-pointer min-w-0">
+                  <input type="checkbox" checked onchange="toggleNoteComplete('${item.id}')" class="w-4 h-4 rounded accent-emerald-500 shrink-0">
+                  <span class="line-through text-slate-300 break-words">${item.depth > 0 ? '↳ ' : ''}${item.content}</span>
+                </label>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderCorrections() {
+      document.getElementById('d-corr-badge').innerText = aiCorrections.length;
+      document.getElementById('m-corr-badge').innerText = aiCorrections.length;
+
+      const el = document.getElementById('corrections-container');
+      el.innerHTML = aiCorrections.map(c => `
+        <div class="bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div class="min-w-0">
+            <div class="font-semibold text-slate-200 mb-1 break-words">📝 筆記：「${c.note_preview}」</div>
+            <div class="text-slate-400 break-words">
+              欄位：<span class="text-indigo-300">${c.field}</span> ｜ 
+              AI 原建議：<span class="line-through text-rose-400">${c.ai_suggestion}</span> ➔ 
+              你的修正：<span class="text-emerald-400 font-semibold">${c.user_correction}</span>
+            </div>
+          </div>
+          <span class="text-slate-500 shrink-0">${c.created_at}</span>
+        </div>
+      `).join('');
+    }
+
+    function openTreeModal(id) {
+      const target = notes.find(n => String(n.id) === String(id));
+      if (!target) return;
+      const root = getRootNote(target);
+      const tree = getTreeNotes(root.id);
+
+      document.getElementById('tree-modal-body').innerHTML = tree.map(item => `
+        <div style="margin-left:${Math.min(item.depth * 16, 48)}px"
+          class="p-3 rounded-xl border ${String(item.id) === String(id) ? 'bg-indigo-950/70 border-indigo-400' : 'bg-slate-800/80 border-slate-700'} text-xs">
+          <div class="flex items-center justify-between mb-1">
+            <span class="font-semibold text-indigo-300">${item.depth === 0 ? '🌟 源頭筆記' : `↳ 第 ${item.depth} 層接續`}（${urgencyLabel(item.urgency)}欄）</span>
+            <span class="text-slate-400">${item.due_date ? `📅 ${item.due_date}` : '♾️ 無截止日'}</span>
+          </div>
+          <div class="${item.is_completed ? 'line-through text-slate-400' : 'text-slate-100'} text-sm break-words">${item.content}</div>
+        </div>
+      `).join('');
+      document.getElementById('tree-modal').classList.remove('hidden');
+    }
+
+    function closeTreeModal() {
+      document.getElementById('tree-modal').classList.add('hidden');
+    }
+
+    // 啟動時自動檢查個人空間代號並連線雲端
+    renderAll();
+    initSupabaseConnection();
+  </script>
+</body>
+</html>
